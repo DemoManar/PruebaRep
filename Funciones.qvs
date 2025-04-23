@@ -1,0 +1,483 @@
+﻿/*
+Proyecto: General
+Fecha Creación: 2019/01/15
+Autores: John Osorio
+Propósito: Creación y estandarización de funciones
+
+Modificaciones :
+=============================================================================================================
+ID  Fecha       Responsable         Descripción del Cambio realizado    
+=============================================================================================================
+01  |2019/01/15 |John Osorio        |Creación de este archivo
+*/ 
+
+TRACE --> Se cargan las subrutinas;
+
+SUB Funciones.InicializarVariables
+    //Esta función permite inicializar las variables necesarioa para la auditoría de los QVDs y permite el guardado de los campos nulos como tal
+    /*
+    //Forma de llamar la función
+      TRACE --> InicializarVariables;
+      CALL Funciones.InicializarVariables;
+    */
+    LET vInicioScript = CONVERTTOLOCALTIME(NOW(), 'GMT-05:00');
+    LET vHoy = DATE(FLOOR(CONVERTTOLOCALTIME(NOW(), 'GMT-05:00')));
+    NullAsNull *;
+
+ENDSUB;
+
+
+SUB Funciones.CrearRutas (_Ambiente,_NombreProyecto)
+    //Esta función permite la creación de rutas de acuerdo al proyecto
+    /*
+    //Forma de llamar la función
+      CALL Funciones.CrearRutas(vAmbiente,vNombreProyecto);
+    */
+    
+    LET vRutaArchivosConfiguracion = 'lib://D__Conexiones:OneDriveEmpresarial/(_Ambiente)/$(_NombreProyecto)/10_Datos/10_Config/';
+    LET vRutaArchivosImportados = 'lib://D__Conexiones:OneDriveEmpresarial/(_Ambiente)/$(_NombreProyecto)/10_Datos/20_Planos/';
+    LET vRutaArchivosExportados = 'lib://D__Conexiones:OneDriveEmpresarial/(_Ambiente)/$(_NombreProyecto)/10_Datos/20_Planos/';
+    LET vRutaQVDExtraccion = 'lib://$(_Ambiente)_D_NombreEmpresa:DataFiles/30_Extraidos/';
+    LET vRutaQVDTransformacion = 'lib://$(_Ambiente)_D_NombreEmpresa:DataFiles/40_Transformados/';
+    LET vRutaArchivoUsuarioNombreCarpetaNombreProyecto = 'lib://$(_Ambiente)_D_$(_NombreProyecto):DataFiles/20_Planos/';
+    LET vRutaQVDExtraccionNombreProyectoDependencia = 'lib://$(_Ambiente)_D_NombreProyectoDependencia:DataFiles/30_Extraidos/';
+    LET vRutaQVDTransformacionNombreProyectoDependencia = 'lib://$(_Ambiente)_D_NombreProyectoDependencia:DataFiles/40_Transformados/';
+
+ENDSUB;
+
+SUB Funciones.EliminarRutas
+    /*
+    //Forma de llamar la función
+      CALL Funciones.EliminarRutas;
+    */
+    LET vRutaArchivosConfiguracion = NULL();
+    LET vRutaArchivosImportados = NULL();
+    LET vRutaArchivosExportados = NULL();
+    LET vRutaQVDExtraccion = NULL();
+    LET vRutaQVDTransformacion = NULL();
+    LET vRutaArchivoUsuarioNombreCarpetaNombreProyecto = NULL();
+    LET vRutaQVDExtraccionNombreProyectoDependencia = NULL();
+    LET vRutaQVDTransformacionNombreProyectoDependencia = NULL();
+    LET vInicioScript = NULL();
+    LET vHoy = NULL();
+ENDSUB;
+
+SUB Funciones.RecargarSiguienteCapa(sub_appID,sub_connAPI)
+    //20220308 Autor Marcos Herrera
+    //Esta función permite recargar la siguiente aplicación o capa en Qlik Cloud, sin necesidad de crear una automatización.
+    //Es necesario crear una conexión Rest, para el uso de esta función
+    /*
+    //Forma de llamar la función
+    //CALL Funciones.RecargarSiguienteCapa('IdApp','Espacio:NombreConexionRest');
+    CALL Funciones.RecargarSiguienteCapa('545sdfvcxfdsf7878fdsdf54','D__General:REST_API_Recarga_App');
+    */    
+    LIB CONNECT TO '$(sub_connAPI)';
+
+    LET sub_QueryBody = '{""appId"":""$(sub_appID)""}';
+    // Collect data from the response for logging
+    // Configure app ID for reload
+
+    RestConnectorMasterTable:
+    SQL 
+    SELECT
+        "id",
+        "appId",
+        "tenantId",
+        "userId",
+        "type",
+        "status",
+        "creationTime",
+        "__KEY_root"
+    FROM 
+        JSON (wrap on) "root" PK "__KEY_root"
+    WITH CONNECTION (BODY "$(sub_QueryBody)");
+
+    ReloadLog:
+    LOAD 
+        DISTINCT         
+        [id]                AS [Reload ID],
+        [appId]             AS [Reload App ID],
+        [tenantId]          AS [Reload Tenant ID],
+        [userId]            AS [Reload User ID],
+        [type]              AS [Reload Type],
+        [status]            AS [Reload Status],
+        [creationTime]      AS [Reload Creation Time],
+        DocumentName()      AS [Reload Trigger App ID],
+        DocumentTitle()     AS [Reload Trigger App Name]
+    RESIDENT 
+        RestConnectorMasterTable
+    WHERE NOT IsNull([__KEY_root]);
+
+    // Set variables to produce log filenames
+    LET sub_ReloadTime = Timestamp(Peek('Reload Creation Time',0),'YYYYMMDDhhmmss');
+    LET sub_ReloadID   = Peek('Reload ID',0);
+
+    TRACE >>> Recarga realizada $(sub_ReloadID) el $(sub_ReloadTime);
+
+    CALL Funciones.EliminarTablas ('ReloadLog,RestConnectorMasterTable');
+    CALL Funciones.EliminarVariables('sub_ReloadTime,sub_ReloadID,sub_QueryBody');
+
+END SUB;
+
+SUB Funciones.EliminarTablas (_tableNames)
+    //Esta función permite la eliminación de una o varias tablas de memoria
+    /*
+    //Forma de llamar la función, Entre comillas simples los nombres de los parámetros.
+      CALL Funciones.EliminarTablas('Tabla1, Tabla2, Tabla3');
+    */
+
+    LET vp.Tables = CHR(39)&REPLACE(_tableNames, ',', CHR(39)&','&CHR(39))&CHR(39);
+    FOR EACH _table IN $(vp.Tables)         
+      LET vp.TableName = TRIM(_table);
+    IF NOOFROWS(vp.TableName) >= 0 THEN
+      TRACE --> Borrando tabla [$(vp.TableName)];
+      DROP TABLE [$(vp.TableName)];
+    ENDIF
+    CALL Funciones.EliminarVariables('vp.TableName');
+    NEXT _table;
+
+    CALL Funciones.EliminarVariables('_tableNames,vp.Tables,_table');     
+
+ENDSUB;
+
+
+SUB Funciones.NroRegistrosTabla (_tableName)
+    //Esta función permite imprimir el número de registros de la tabla que se recibe por parámetro
+    /*
+    //Forma de llamar la función. Entre comillas simples los nombres de los parámetros.
+      CALL Funciones.NroRegistrosTabla('Tabla1'); 
+    */
+    LET vNroRegCargados= NUM(NOOFROWS(_tableName),'#############.###');
+    TRACE --> Número de registros en '$(_tableName)': '$(vNroRegCargados)';
+
+    CALL Funciones.EliminarVariables('_tableName,vNroRegCargados');     
+
+ENDSUB;
+
+
+SUB Funciones.EliminarVariables (_VariablesaEliminar)
+  //Esta función permite la eliminación de una o varias variables, recibidas por parámetro
+  /*
+  //Forma de llamar la función. Entre comillas simples los nombres de los parámetros.
+    CALL Funciones.EliminarVariables('Variable1,Variable2');
+  */
+  LET _VariablesaEliminar = REPLACE(_VariablesaEliminar,CHR(39),'');
+
+  LET _VariablesaEliminar = CHR(39)&REPLACE(_VariablesaEliminar, ',', CHR(39)&','&CHR(39))&CHR(39);
+  
+  FOR EACH _NombreVariable IN $(_VariablesaEliminar)
+    LET $(_NombreVariable)=NULL();
+  NEXT _NombreVariable;
+
+  LET _VariablesaEliminar=NULL();
+  LET _NombreVariable=NULL();
+
+ENDSUB;
+
+
+SUB Funciones.IndexarTabla(_tablaNombre,_campoClave)
+      //Esta función se puede usar cuando el campo clave de una tabla contiene valores repetidos, y su objetivo es ubicar consecutivamente los 
+      //valores repetiros en la tabla, permitiendo un mejor tiempo de respuesta al momento de hacer filtros o set analysis en capa de presentación  
+      //https://www.michaelsteedle.com/2020/07/indexing-qlik-data-model-tables-more.html
+      
+      /*
+      //Forma de llamar la función. Entre comillas simples los nombres de los parámetros.
+        CALL Funciones.IndexarTabla('NombreTabla','CampoClave');        
+      */
+      IF (LEN('$(_tablaNombre)')>1 AND LEN('$(_campoClave)')>1) THEN
+          
+          IF NOOFROWS('$(_tablaNombre)') >= 0 THEN      
+              TRACE --> Se procede a Indexar la tabla '$(_tablaNombre)';
+
+              OUTER JOIN ([$(_tablaNombre)])
+              LOAD
+                NULL() AS [$(_campoClave)]
+              AUTOGENERATE 0;
+
+              TRACE --> Se ha finalizado la Indexación de la tabla '$(_tablaNombre)' por el campo '$(_campoClave)';
+              
+              CALL Funciones.EliminarVariables('_tablaNombre,_campoClave');
+          ELSE
+              TRACE --> La tabla no se encuentra cargada y no se puede Indexar;          
+          ENDIF;
+      ELSE
+          TRACE --> NO se reciben los parámetros completos de la función para lograr la indexacción. Verifique el Nombre de la tabla o el nombre del campo clave;
+      ENDIF;
+ENDSUB;
+
+
+SUB Funciones.GuardarQVD(_tablaNombre, _tablaAlias, _tablaRuta, _TablaEliminar)
+      //Esta función permite guardar un QVD en la carpeta de Extracción, Transformación ó ruta definida, 
+      //asignándole un Alias, definiendo la ruta de guardado por parámetro y estableciendo si se desea 
+      //eliminar la tabla de memoria una vez se guarde el QVD
+      /*
+      //Forma de llamar la función
+          //CALL Funciones.GuardarQVD('NombreTabla','NombreQVD',Ruta[1:Extraccion, 2:Transformacion ó Ruta],EliminarTabla[0:Mantener en memoria 1:Eliminar]);
+          CALL Funciones.GuardarQVD('$(vNombreTabla)','$(vNombreQVD)',2,1);
+      */
+     TRACE --> Guardar el QVD; 
+     // Valida el parámetro de entrada del nombre de la tabla
+     IF LEN('$(_tablaNombre)')=0 THEN
+          TRACE --> Es necesario ingresar el Nombre de la tabla;
+          EXIT SUB;
+     ELSE 
+          SET vp.TableName = '$(_tablaNombre)';
+     ENDIF;
+     
+     // Valida el parámetro de entrada del alias de la tabla
+     IF LEN('$(_tablaAlias)')=0 THEN
+          TRACE --> Es necesario ingresar el Nombre del QVD a guardar;
+          EXIT SUB;
+     ELSE 
+          SET vp.TableAlias = '$(_tablaAlias)';
+     ENDIF;
+
+     // Valida el parámetro de entrada de la ruta para almacenar el QVD
+     IF LEN('$(_tablaRuta)')=0 THEN
+          TRACE --> Es necesario ingresar la ruta ó el número que identifica la ruta donde se guardará el QVD [1:Extraccion, 2:Transformacion ó Ruta];
+          EXIT SUB;
+     ELSE 
+          SET vp.TablePath = '$(_tablaRuta)';
+     ENDIF;
+
+     // Valida el parámetro de entrada de la opción para elimnar la tabla de memoria
+     IF LEN('$(_TablaEliminar)')=0 THEN
+          TRACE --> Es necesario ingresar el número que identifica si se debe eliminar o no la tabla de memoria [0:Mantener en memoria 1:Eliminar];
+          EXIT SUB;
+     ELSE 
+          SET vp.TableDrop = '$(_TablaEliminar)';
+     ENDIF;
+     
+     IF NOOFROWS('$(vp.TableName)') >= 0 THEN
+     
+     CALL Funciones.NroRegistrosTabla('$(vp.TableName)');     
+        
+        IF(ISNUM('$(_tablaRuta)')) THEN
+            SWITCH '$(_tablaRuta)'
+            CASE '1' //Extracción
+
+                TRACE --> Se almacena el QVD en la ruta de Extracción [$(vRutaQVDExtraccion)$(vp.TableAlias).qvd];
+                STORE $(vp.TableName) INTO [$(vRutaQVDExtraccion)$(vp.TableAlias).qvd](qvd);              
+                LET vTamañoKB =  (FileSize('$(vRutaQVDExtraccion)$(vp.TableAlias).qvd')/1024);
+                LET vFase = 'Extraccion';
+                LET vRutaGuardado='$(vRutaQVDExtraccion)';
+
+            CASE '2' //Transformación
+
+                TRACE --> Se almacena el QVD en la ruta de Transformación [$(vRutaQVDTransformacion)$(vp.TableAlias).qvd];
+                STORE $(vp.TableName) INTO [$(vRutaQVDTransformacion)$(vp.TableAlias).qvd](qvd);              
+                LET vTamañoKB =  (FileSize('$(vRutaQVDTransformacion)$(vp.TableAlias).qvd')/1024); 
+                LET vFase = 'Transformacion';
+                LET vRutaGuardado='$(vRutaQVDTransformacion)';
+
+            DEFAULT 
+
+                   TRACE --> No se ha definido la ruta de guardado para el QVD;  
+
+            END SWITCH;
+       
+        ELSE
+            //Ruta recibida como parámetro
+            IF LEN('$(_tablaRuta)')>3 THEN
+            
+                TRACE --> Se almacena el QVD en la ruta [$(_tablaRuta)$(vp.TableAlias).qvd];
+                STORE $(vp.TableName) INTO [$(_tablaRuta)$(vp.TableAlias).qvd](qvd);              
+                LET vTamañoKB =  (FileSize('$(_tablaRuta)$(vp.TableAlias).qvd')/1024); 
+                LET vFase = SUBFIELD(REPLACE('$(_tablaRuta)','/','\'),'\',-2);   
+                LET vRutaGuardado='$(_tablaRuta)';
+
+            ELSE
+            
+                TRACE --> No se ha definido una ruta adecuada para guardar el QVD; 
+                
+            ENDIF;
+        ENDIF;
+
+        LET vNoColumnas = NOOFFIELDS('$(vp.TableName)'); 
+        LET vNoRegistros = NOOFROWS('$(vp.TableName)'); 
+        LET vAhora = CONVERTTOLOCALTIME(NOW(), 'GMT-05:00');
+        LET vAplicacion=DOCUMENTTITLE();
+
+        ResumenTabla:
+        LOAD * INLINE [
+        Fase, Tabla, HoraInicio, HoraFin, Registros, Columnas, TamañoKB, RutaQVD, Ambiente, Proyecto, Aplicacion
+        $(vFase), $(vp.TableAlias), $(vInicioScript), $(vAhora), $(vNoRegistros), $(vNoColumnas), '$(vTamañoKB)', '$(vRutaGuardado)', '$(vAmbiente)', '$(vNombreProyecto)', '$(vAplicacion)'
+        ];
+        
+        LET vInicioScript = CONVERTTOLOCALTIME(NOW(), 'GMT-05:00');
+
+        IF ($(vp.TableDrop)=1) THEN
+            TRACE --> Se elimina la tabla '$(vp.TableName)' de memoria;
+            CALL Funciones.EliminarTablas ('$(vp.TableName)');
+        ELSE
+            TRACE --> La tabla '$(vp.TableName)' no se ha eliminado de memoria;
+        ENDIF;
+          
+     ELSE 
+          TRACE --> La tabla no se encuentra cargada y no se puede guardar;   
+          IF ($(vp.TableDrop)=1) THEN
+            TRACE --> Se elimina la tabla '$(vp.TableName)' de memoria;
+            CALL Funciones.EliminarTablas ('$(vp.TableName)');
+          ELSE
+            TRACE --> La tabla '$(vp.TableName)' no se ha eliminado de memoria;
+          ENDIF; 
+     ENDIF;     
+
+     CALL Funciones.EliminarVariables('_tablaTipo,_tablaNombre,_tablaAlias,_tablaRuta,_UsarQualify,_TablaEliminar');
+     CALL Funciones.EliminarVariables('vp.TableType,vp.TableName,vp.TableAlias,vp.TablePath,vp.TableDrop,vp.UsarQualify,vTableNameTMP,vNoColumnas,vNoRegistros,vAhora,vFase,vTamañoKB,vRutaGuardado,vAplicacion');
+     CALL Funciones.EliminarVariables('vSetTablaNombre,vSetTablaAlias,vSetTablaRuta,vUsarQualify,vSetTablaEliminar');
+ENDSUB;
+
+SUB Funciones.GuardarQVDPorSegmento(_NombreTablaSegmento, _AliasTablaSegmento, _CampoSegmento, _RutaTablaSegmento, _EliminarTablaSegmento)
+  //Esta función permite guardar un QVD por Segmento (Periodo, Filial, etc) en la carpeta en la carpeta 
+  //de Extracción, Transformación o ruta definida, asignándole un Alias, definiendo la ruta de guardado 
+  //por parámetro, indicando el campo por el cual se va a segmentar y estableciendo si se desea eliminar 
+  //la tabla de memoria una vez se guarde el QVD
+  /*
+  //Forma de llamar la función
+    //CALL Funciones.GuardarQVDPorSegmento('NombreTabla','NombreQVD','Campo para el segmento',Ruta[1:Extraccion 2:Transformacion ó Ruta],EliminarTabla[0:Mantener en memoria 1:Eliminar]);
+    CALL Funciones.GuardarQVDPorSegmento('$(vNombreTabla)','$(vNombreQVD)','Periodo',2,1);
+  */
+    TRACE --> Guardar el QVD por Segmento;
+
+    TRACE --> Se valida que la tabla recibida contenga regristros;
+        
+    IF (NOOFROWS('$(_NombreTablaSegmento)')>0) THEN
+        
+        CALL Funciones.NroRegistrosTabla('$(_NombreTablaSegmento)');
+        
+        TRACE --> Se setean con el texto 'NULOS', los valores del capo '$(_CampoSegmento)' que vienen en null dentro de la tabla '$(_NombreTablaSegmento)';
+        NULLASVALUE [$(_CampoSegmento)];
+        SET NULLVALUE = 'NULOS'; 
+
+        RENAME TABLE [$(_NombreTablaSegmento)] TO [_$(_NombreTablaSegmento)];
+        NOCONCATENATE
+        [$(_NombreTablaSegmento)]:
+        LOAD
+           *
+        RESIDENT
+          [_$(_NombreTablaSegmento)];
+
+        NULLASNULL *;
+
+        CALL Funciones.EliminarTablas ('_$(_NombreTablaSegmento)');
+        
+        TRACE --> Se obtienen los distintos Segmentos de la tabla $(_NombreTablaSegmento), para realizar la partición por QVDs;
+        
+        _TmpSegmento:
+        LOAD
+          DISTINCT
+          "$(_CampoSegmento)" AS SegmentoParticion
+        RESIDENT
+          [$(_NombreTablaSegmento)]
+        ORDER BY
+          $(_CampoSegmento);    
+        
+        CALL Funciones.NroRegistrosTabla('_TmpSegmento');
+        
+        TRACE --> Se definen las rutas de carga, de acuerdo al parámetro recibido;
+        
+        IF(ISNUM('$(_RutaTablaSegmento)')) THEN
+            SWITCH '$(_RutaTablaSegmento)'
+            CASE '1' //Extracción
+
+                LET vRutaDummy ='$(vRutaQVDExtraccion)';
+
+            CASE '2' //Transformación
+
+                LET vRutaDummy ='$(vRutaQVDTransformacion)';
+
+            DEFAULT 
+
+                   TRACE --> No se ha definido la ruta de guardado para el QVD; 
+                   EXIT SUB;
+
+            END SWITCH;
+       
+        ELSE
+            //Ruta recibida como parámetro
+            IF LEN('$(_RutaTablaSegmento)')>3 THEN
+            
+                LET vRutaDummy ='$(_RutaTablaSegmento)'; 
+                
+            ELSE
+            
+                TRACE --> No se ha definido una ruta adecuada para guardar el QVD; 
+                EXIT SUB;
+                
+            ENDIF;
+        ENDIF;
+        
+        TRACE --> Se guarda en la carpeta de Transformación el QVD _DummySepararPorSegmento, para realizar la separación con Where Exists;
+        
+        CALL Funciones.GuardarQVD('$(_NombreTablaSegmento)','_DummySepararPorSegmento$(_NombreTablaSegmento)','$(_RutaTablaSegmento)',1);
+
+        IF (NOOFROWS('_TmpSegmento')>0) THEN
+
+            TRACE --> Se procede a particionar por Segmento, el QVD '$(_NombreTablaSegmento)';
+
+            FOR EACH vSegmento IN FIELDVALUELIST('SegmentoParticion')
+        
+                TRACE --> Se carga una tabla con el segmento a filtrar;
+                
+                _TmpFiltoSegmento:
+                FIRST 1
+                LOAD
+                  SegmentoParticion AS [$(_CampoSegmento)]
+                RESIDENT
+                  _TmpSegmento
+                WHERE
+                  MATCH(SegmentoParticion,'$(vSegmento)');
+                    
+                LET vNombreTabla= '$(_AliasTablaSegmento)'&'_'&'$(vSegmento)';
+
+                TRACE --> Se genera el QVD '$(vNombreTabla).qvd', usando la carga optimizada con el Where Exists;
+        
+                NOCONCATENATE
+                [$(vNombreTabla)]:
+                LOAD
+                    *
+                FROM
+                    [$(vRutaDummy)_DummySepararPorSegmento$(_NombreTablaSegmento).qvd](qvd)
+                WHERE
+                    EXISTS([$(_CampoSegmento)]);
+
+                TRACE --> Guardar el QVD;
+                //CALL Funciones.GuardarQVD('NombreTabla','NombreQVD',Ruta[1:Extraccion 2:Transformacion ó Ruta],EliminarTabla[0:Mantener en memoria 1:Eliminar]);
+                CALL Funciones.GuardarQVD('$(vNombreTabla)','$(vNombreTabla)','$(_RutaTablaSegmento)',1);
+                                
+                CALL Funciones.EliminarTablas ('_TmpFiltoSegmento');
+                
+            NEXT vSegmento; // Próximo Segmento.
+            
+            IF($(_EliminarTablaSegmento)=0) THEN
+                [$(_NombreTablaSegmento)]:
+                LOAD
+                    *
+                FROM
+                    [$(vRutaDummy)_DummySepararPorSegmento$(_NombreTablaSegmento).qvd](qvd);
+            ENDIF;
+            
+            TRACE --> Se guarda el QVD _DummySepararPorSegmento con un registro nulo, para que no ocupe espacio;
+            
+            [_DummySepararPorSegmento$(_NombreTablaSegmento)]:
+            LOAD * INLINE [
+            Dummy
+            ];
+            
+            CALL Funciones.GuardarQVD('_DummySepararPorSegmento$(_NombreTablaSegmento)','_DummySepararPorSegmento$(_NombreTablaSegmento)','$(_RutaTablaSegmento)',1);
+            
+            CALL Funciones.EliminarVariables('vSegmento,_NombreTablaSegmento, _AliasTablaSegmento, _RutaTablaSegmento, _EliminarTablaSegmento,vRutaDummy');
+             
+        ELSE
+          TRACE --> No se encuentran Segmento a particionar en la tabla $(_NombreTablaSegmento);
+        ENDIF;
+
+        CALL Funciones.EliminarTablas('_TmpSegmento,_TmpFiltoSegmento');
+    ELSE
+      TRACE --> La tabla recibida no contiene registros;
+      IF($(_EliminarTablaSegmento)=1) THEN
+            CALL Funciones.EliminarTablas ('$(_NombreTablaSegmento)');
+        ENDIF;
+    ENDIF;
+END SUB;
